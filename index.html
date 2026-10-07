@@ -364,9 +364,9 @@ var I693 = (function(){
     {more:"(3) Remarks and treatment",rows:[{k:"syRem",l:"Remarks",t:"area",p:"Pt8Line1B3_Remarks[0]",w:6,hint:"Stage diagnosed and therapy with doses and dates"}].concat(drugRx("sy","Pt8Line1B3"))}
   ]});
   S.push({id:"p8c",who:"clinic",part:"Part 8 · 1C",title:"Gonorrhea",note:"Required for applicants 18–24.",rows:[
-    {k:"gN",l:"(a) Screening NAAT name",p:"Pt8Line1C1a_name[0]",w:3},
+    {k:"gN",l:"(a) Screening NAAT name",t:"pick",o:["GC NAAT Urine"],p:"Pt8Line1C1a_name[0]",w:6},
     {k:"gD",l:"(b) Date result reported",t:"date",p:"Pt7Line1C1b_DateScreeningNucleicAcid[0]",w:2},
-    {k:"gRes",l:"(c) Result",t:"radio",w:1,o:[["Positive","Pt8Line1C1c[0]"],["Negative","Pt8Line1C1c[1]"]]},
+    {k:"gRes",l:"(c) Result",t:"radio",w:4,o:[["Positive","Pt8Line1C1c[0]"],["Negative","Pt8Line1C1c[1]"]]},
     {k:"gF",l:"(2) Findings",t:"radio",w:6,o:[["No Class A or Class B gonorrhea","Pt8Line1c2_Findings[2]"],["Class A (untreated)","Pt8Line1c2_Findings[1]"],["Class B (treated in the last year)","Pt8Line1c2_Findings[0]"]]},
     {more:"(3) Remarks and treatment",rows:[{k:"gRem",l:"Remarks",t:"area",p:"Pt8Line1c3_Remarks[0]",w:6}].concat(drugRx("g","Pt8Line1C3"))}
   ]});
@@ -565,7 +565,7 @@ if(typeof module!=="undefined") module.exports=I693;
       r.o.concat(["Other"]).forEach(function(o,i){ var iid=id+"_"+i;
         pb.appendChild(el("label",{class:"chip",for:iid},'<input type="radio" name="'+id+'" id="'+iid+'" data-pick="'+r.k+'" value="'+(o==="Other"?"__other":esc(o))+'"><span>'+esc(o)+'</span>')); });
       var ot=el("input",{type:"text",id:id,"data-pick-text":r.k,placeholder:"Type the test name",style:"max-width:280px"}); pb.appendChild(ot);
-      var pc=el("button",{type:"button",class:"btn link",style:"padding:4px 2px;font-size:12.5px"},"Clear"); pc.onclick=function(){ st[r.k]=""; st[r.k+"__other"]=false; sync(); }; pb.appendChild(pc);
+      var pc=el("button",{type:"button",class:"btn link",style:"padding:4px 2px;font-size:12.5px"},"Clear"); pc.onclick=function(){ markManual(r.k); st[r.k]=""; st[r.k+"__other"]=false; sync(); }; pb.appendChild(pc);
       w.appendChild(pb); w.setAttribute("data-pickopts",JSON.stringify(r.o)); return w;
     }
     if(r.t==="radio"||r.t==="checks"){
@@ -574,7 +574,7 @@ if(typeof module!=="undefined") module.exports=I693;
       r.o.forEach(function(o,i){ var iid=id+"_"+i;
         var inp = r.t==="radio"? '<input type="radio" name="'+id+'" id="'+iid+'" data-k="'+r.k+'" value="'+esc(o[0])+'">' : '<input type="checkbox" id="'+iid+'" data-k="'+r.k+"|"+esc(o[0])+'">';
         box.appendChild(el("label",{class:"chip",for:iid},inp+"<span>"+esc(o[0])+"</span>")); });
-      if(r.t==="radio"&&!r.req){ var cl=el("button",{type:"button",class:"btn link",style:"padding:4px 2px;font-size:12.5px"},"Clear"); cl.onclick=function(){ st[r.k]=""; sync(); }; box.appendChild(cl); }
+      if(r.t==="radio"&&!r.req){ var cl=el("button",{type:"button",class:"btn link",style:"padding:4px 2px;font-size:12.5px"},"Clear"); cl.onclick=function(){ markManual(r.k); st[r.k]=""; sync(); }; box.appendChild(cl); }
       w.appendChild(box); return w;
     }
     if(r.t==="check"){ w.appendChild(el("label",{class:"chip",for:id},'<input type="checkbox" id="'+id+'" data-k="'+r.k+'"><span>'+esc(r.l)+'</span>')); return w; }
@@ -662,6 +662,7 @@ if(typeof module!=="undefined") module.exports=I693;
       } else host.appendChild(s);
     });
     applyAgeRules();
+    applyTestRules();
     sync();
   }
   function sync(){
@@ -678,15 +679,16 @@ if(typeof module!=="undefined") module.exports=I693;
   document.addEventListener("input",onIn); document.addEventListener("change",onIn);
   function onIn(e){ var i=e.target;
     var pk=i.getAttribute&&i.getAttribute("data-pick"), pt=i.getAttribute&&i.getAttribute("data-pick-text");
-    if(pk&&i.checked){ if(i.value==="__other"){ st[pk+"__other"]=true; st[pk]=""; sync(); var tx=document.querySelector('[data-pick-text="'+pk+'"]'); if(tx) tx.focus(); } else { st[pk+"__other"]=false; st[pk]=i.value; sync(); } return; }
-    if(pt){ st[pt]=i.value; st[pt+"__other"]=true; return; }
+    if(pk&&i.checked){ markManual(pk); if(i.value==="__other"){ st[pk+"__other"]=true; st[pk]=""; sync(); var tx=document.querySelector('[data-pick-text="'+pk+'"]'); if(tx) tx.focus(); } else { st[pk+"__other"]=false; st[pk]=i.value; sync(); } return; }
+    if(pt){ st[pt]=i.value; st[pt+"__other"]=true; markManual(pt); return; }
     var k=i.getAttribute&&i.getAttribute("data-k"); if(!k) return;
     if(i.type==="radio"){ if(i.checked) st[k]=i.value; }
     else if(i.type==="checkbox") st[k]=i.checked;
     else { if(i.inputMode==="numeric") i.value=i.value.replace(/\D/g,""); st[k]=i.value; }
     i.classList.remove("invalid");
     if(/^v\d+na$/.test(k)){ st.__manual=st.__manual||{}; st.__manual[k]=true; if(st.__auto) delete st.__auto[k]; }
-    if(k==="dob"||k==="exam1"){ applyAgeRules(); sync(); }
+    if(TEST_KEYS[k]) markManual(k);
+    if(k==="dob"||k==="exam1"){ applyAgeRules(); applyTestRules(); sync(); }
     if(k.slice(-2)==="On"||/^(intOn|prepOn|refOn)$/.test(k)) document.querySelectorAll('[data-show="'+k+'"]').forEach(function(d){ d.hidden=!st[k]; });
   }
 
@@ -745,7 +747,7 @@ if(typeof module!=="undefined") module.exports=I693;
   function showLoaded(n,m){ $("#ld-name").textContent=n; $("#ld-meta").textContent=m; $("#loaded").hidden=false; $("#drop").hidden=true; }
 
   /* ---------- save ---------- */
-  function defaults(s){ if(!s.ntN) s.ntN="RPR Screen";
+  function defaults(s){
     /* Part 7: clinic suite, also fills PDFs made before the suite was added */
     ["cp","cm"].forEach(function(x){ if(!s[x+"Un"]){ s[x+"Un"]="694"; if(!s[x+"Ut"]) s[x+"Ut"]="Ste"; } });
     /* Usual findings, preselected. Only fills answers that are still blank, so a reopened PDF keeps what was chosen. */
@@ -753,17 +755,46 @@ if(typeof module!=="undefined") module.exports=I693;
     return s; }
   var CLINIC_DEFAULTS={
     overall:"No Class A or Class B condition",
-    igra:"QuantiFERON", igraRes:"Negative",
-    cxrNeed:"Chest X-ray not required (medically cleared for TB)",
-    spDec:"No, not indicated",
-    tbClass:"No Class A or Class B TB",
-    ntRes:"Nonreactive",
-    syF:"No Class A or Class B syphilis",
     hF:"No Class A/B condition",
     pm:"No Class A or B physical or mental disorder",
     du:"No Class A or B substance (drug) abuse/addiction",
     vRes:"Applicant completed vaccination requirements or may be eligible for blanket waivers as indicated above"
   };
+  /* Lab tests by age (clinic protocol). Filled when the age calls for the test, cleared again
+     if a corrected DOB means it no longer applies. Anything the provider changes is left alone. */
+  var TEST_GROUPS=[
+    { id:"tb", name:"QuantiFERON TB test", rule:"age 2 and older",
+      needed:function(a){ return a? a.years>=2 : true; },
+      set:{ igra:"QuantiFERON", igraRes:"Negative", cxrNeed:"Chest X-ray not required (medically cleared for TB)", spDec:"No, not indicated", tbClass:"No Class A or Class B TB" } },
+    { id:"sy", name:"RPR Screen (syphilis)", rule:"ages 18\u201344",
+      needed:function(a){ return a? (a.years>=18 && a.years<=44) : true; },
+      set:{ ntN:"RPR Screen", ntRes:"Nonreactive", syF:"No Class A or Class B syphilis" } },
+    { id:"gc", name:"GC NAAT Urine (gonorrhea)", rule:"ages 18\u201324",
+      needed:function(a){ return a? (a.years>=18 && a.years<=24) : false; },
+      set:{ gN:"GC NAAT Urine", gRes:"Negative", gF:"No Class A or Class B gonorrhea" } }
+  ];
+  var TEST_KEYS={}; TEST_GROUPS.forEach(function(g){ Object.keys(g.set).forEach(function(k){ TEST_KEYS[k]=1; }); });
+  function markManual(k){ st.__manual=st.__manual||{}; st.__manual[k]=true; if(st.__auto) delete st.__auto[k]; }
+  function applyTestRules(){
+    if(mode!=="clinic") return;
+    st.__auto=st.__auto||{}; st.__manual=st.__manual||{};
+    var a=I693.ageAt(st.dob, st.exam1), lines=[];
+    TEST_GROUPS.forEach(function(g){
+      var need=g.needed(a);
+      Object.keys(g.set).forEach(function(k){
+        if(st.__manual[k]) return;
+        if(need){ if(!st[k]){ st[k]=g.set[k]; st.__auto[k]=true; if(k==="ntN"||k==="gN") st[k+"__other"]=false; } }
+        else if(st.__auto[k]){ st[k]=""; delete st.__auto[k]; }
+      });
+      lines.push((need?"<b>Required:</b> ":"<span style=\"color:var(--muted)\">Not required:</span> ")+g.name+" <span style=\"color:var(--muted)\">("+g.rule+")</span>");
+    });
+    var host=document.getElementById("p8a"); if(!host) return;
+    var box=document.getElementById("test-age");
+    if(!box){ box=el("div",{class:"note",id:"test-age",style:"font-size:13.5px;margin-bottom:14px"}); host.insertBefore(box, host.children[1]||null); }
+    box.className = a? "note" : "note warn";
+    box.innerHTML="<div>"+(a? "<b>Tests for age "+ageText(a)+"</b>" : "<b>No date of birth yet.</b> TB and syphilis are filled for now; add the DOB in Part 1 to apply the age rules.")+
+      "<br>"+lines.join("<br>")+"<br><span style=\"color:var(--muted)\">Results are preset to negative or nonreactive. Change them if the lab says otherwise.</span></div>";
+  }
   function status(t,c){ var s=$("#status"); s.textContent=t; s.className="status"+(c?" "+c:""); }
   function validate(){ var bad=[];
     I693.specs("patient").forEach(function(s){ if(!s.req) return; if(!st[s.k]){ bad.push(s.l);
