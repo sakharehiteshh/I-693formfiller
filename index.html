@@ -99,6 +99,8 @@ table.grid-t{border-collapse:collapse;width:100%;min-width:860px;font-size:13px}
 .vgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
 .vgrid label{font-size:11.5px;font-weight:600;color:var(--muted)}
 .vgrid input{min-height:34px;padding:5px 6px;font-size:13px}
+.vgrid input.cs-in{font-family:"Times New Roman",Times,serif;font-size:16px;text-align:center}
+.vgrid input.cs-in::placeholder{font-family:var(--body);font-size:12px}
 .vwaive{align-items:center;gap:6px}
 .vwaive .wl{font:500 11px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-right:2px}
 @media (max-width:460px){.vgrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
@@ -162,6 +164,7 @@ input[type=date]{-webkit-appearance:none;appearance:none;min-width:0}
   <div class="modes" role="group" aria-label="Who is filling the form">
     <button type="button" id="m-patient" aria-pressed="true">Applicant</button>
     <button type="button" id="m-clinic" aria-pressed="false">Civil surgeon</button>
+    <button type="button" id="m-edit" aria-pressed="false">Edit</button>
   </div>
 </div></header>
 
@@ -191,6 +194,25 @@ input[type=date]{-webkit-appearance:none;appearance:none;min-width:0}
     <button type="submit" class="btn primary" style="align-self:flex-start">Unlock</button>
     <button type="button" class="btn link" id="pw-back" style="align-self:flex-start">Back to the applicant form</button>
   </form>
+
+  <!-- EDIT INTRO -->
+  <div id="intro-edit" hidden style="display:flex;flex-direction:column;gap:16px">
+    <div>
+      <h1>Edit an I-693</h1>
+      <p class="lede">Open any I-693 made with this page, applicant or completed. Every part opens for editing, and nothing is filled in or changed for you. When you email it, staff get it marked <b>Edited</b> with a list of what changed.</p>
+    </div>
+    <label class="drop" id="drop-e" for="file-e">
+      <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="color:var(--accent)"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="m9.5 16.5 1-3 5-5 2 2-5 5z"/></svg>
+      <b>Open the I-693 PDF to edit</b>
+      <span style="color:var(--muted);font-size:13.5px">Drop it here or tap to choose. It's read on this device only.</span>
+      <input type="file" id="file-e" accept="application/pdf,.pdf" hidden>
+    </label>
+    <div class="loaded" id="loaded-e" hidden>
+      <div style="min-width:0;flex:1"><div class="who" id="lde-name">—</div><div class="meta" id="lde-meta">—</div></div>
+      <button type="button" class="btn" id="lde-change">Open a different PDF</button>
+    </div>
+    <div style="display:flex;justify-content:flex-end"><button type="button" class="btn link" id="lockbtn-e" style="color:var(--muted)">Lock and clear</button></div>
+  </div>
 
   <!-- CLINIC INTRO -->
   <div id="intro-clinic" hidden style="display:flex;flex-direction:column;gap:16px">
@@ -512,7 +534,29 @@ var I693 = (function(){
     try{ doc.catalog.delete(PL.PDFName.of("NeedsRendering")); }catch(e){}
     write(form,st,who);
     form.getFields().forEach(function(f){ try{ f.disableReadOnly(); }catch(e){} });
-    return await doc.save({updateFieldAppearances:true});
+    /* Shrink text that would not fit its box on one line (e.g. "03/15/2024 (I)" in Complete series) */
+    var helv=await doc.embedFont(PL.StandardFonts.Helvetica), times=await doc.embedFont(PL.StandardFonts.TimesRoman);
+    form.getFields().forEach(function(f){
+      if(typeof f.getText!=="function" || typeof f.setFontSize!=="function") return;
+      var t=f.getText(); if(!t || t.indexOf("\n")>-1) return;
+      var multi=f.isMultiline&&f.isMultiline(); if(multi && !/CompleteSeries/.test(f.getName())) return;
+      var w=f.acroField.getWidgets()[0]; if(!w) return; var r=w.getRectangle();
+      var need=times.widthOfTextAtSize(t,10), room=r.width-4;
+      if(need>room){ try{ f.setFontSize(Math.max(6, Math.floor(room/need*10*10)/10)); }catch(e){} }
+    });
+    form.getFields().forEach(function(f){ if(/CompleteSeries/.test(f.getName()) && typeof f.setAlignment==="function"){ try{ f.disableMultiline(); f.setAlignment(PL.TextAlignment.Center); }catch(e){} } });
+    /* One serif face (Times) for every filled-in field on the form */
+    form.updateFieldAppearances(times);
+    form.getFields().forEach(function(f){ if(!isCB(f) && typeof f.updateAppearances==="function"){ try{ f.updateAppearances(times); }catch(e){} } });
+    /* Every checkbox on the form prints as an X, not a check mark */
+    form.getFields().forEach(function(f){ if(isCB(f)) f.updateAppearances(xBox); });
+    return await doc.save({updateFieldAppearances:false});
+  }
+  function xBox(cb,widget){
+    var PL=PDFLib, r=widget.getRectangle(), w=r.width, h=r.height, p=Math.min(w,h)*0.2;
+    var box=[PL.pushGraphicsState(),PL.setStrokingRgbColor(0,0,0),PL.setLineWidth(0),PL.moveTo(0,0),PL.lineTo(0,h),PL.lineTo(w,h),PL.lineTo(w,0),PL.closePath(),PL.stroke(),PL.popGraphicsState()];
+    var x=box.concat([PL.pushGraphicsState(),PL.setStrokingRgbColor(0,0,0),PL.setLineWidth(1.2),PL.moveTo(p,p),PL.lineTo(w-p,h-p),PL.moveTo(p,h-p),PL.lineTo(w-p,p),PL.stroke(),PL.popGraphicsState()]);
+    return {normal:{on:x,off:box},down:{on:x,off:box}};
   }
   async function load(bytes){ var doc=await PDFLib.PDFDocument.load(bytes,{ignoreEncryption:true}); return read(doc.getForm()); }
   /* ---------- age-appropriate vaccines (clinic table) ----------
@@ -601,15 +645,15 @@ if(typeof module!=="undefined") module.exports=I693;
   function cell(k,t){ return '<td'+(t==="check"?' class="cb"':'')+'>'+(t==="check"?'<input type="checkbox" data-k="'+k+'" id="f_'+k+'" aria-label="'+k+'">':'<input type="'+(t||"text")+'" data-k="'+k+'" id="f_'+k+'"'+(t?"":' class="cs" placeholder="X, date, VH"')+'>')+'</td>'; }
   function vaxTable(){
     var w=el("div",{class:"sp6",style:"grid-column:1/-1;display:flex;flex-direction:column;gap:10px"});
-    w.appendChild(el("p",{style:"margin:0;font-size:13px;color:var(--muted)"},"Dates received come from the applicant's written record. <b>Complete series</b>: X if complete, the lab date if immune, or VH for varicella history. Waivers are blanket waivers to request from USCIS; * means the vaccine isn't available locally (flu and COVID-19 only)."));
-    w.appendChild(el("div",{class:"note",id:"vax-age",style:"font-size:13.5px"}));
+    w.appendChild(el("p",{style:"margin:0;font-size:13px;color:var(--muted)"},"Dates received come from the applicant's written record. <b>Complete series</b>: X if complete, the lab date followed by (I) if immune, e.g. <i>03/15/2024 (I)</i>, or VH for varicella history. Waivers are blanket waivers to request from USCIS; <i>See below table</i> (flu and COVID-19 only) matches the column of that name on the form."));
+    if(mode==="clinic") w.appendChild(el("div",{class:"note",id:"vax-age",style:"font-size:13.5px"}));
     var list=el("div",{class:"vlist"});
     I693.VAX.forEach(function(v,i){ var b="v"+i;
-      function inp(k,lab,type){ return '<div class="f"><label for="f_'+k+'">'+lab+'</label><input type="'+(type||"text")+'" id="f_'+k+'" data-k="'+k+'"'+(type?"":' placeholder="X, date, VH"')+'></div>'; }
+      function inp(k,lab,type){ return '<div class="f"><label for="f_'+k+'">'+lab+'</label><input type="'+(type||"text")+'" id="f_'+k+'" data-k="'+k+'"'+(type?"":' class="cs-in" placeholder="X, 03/15/2024 (I), VH"')+'></div>'; }
       function cb(k,lab){ return '<label class="chip" for="f_'+k+'"><input type="checkbox" id="f_'+k+'" data-k="'+k+'"><span>'+lab+'</span></label>'; }
       var h='<div class="vrow"><div class="vhead"><span class="vname">'+esc(v.n)+'</span>'+(v.spec?'<span class="opts vspec">'+v.spec.map(function(s){return cb(b+"s"+s[0],s[0]);}).join("")+'</span>':"")+'</div>';
       h+='<div class="vgrid">'+[0,1,2,3].map(function(j){return inp(b+"d"+j,"Received "+(j+1),"date");}).join("")+inp(b+"g","Given by CS","date")+inp(b+"c","Complete series")+'</div>';
-      h+='<div class="opts vwaive"><span class="wl">Waiver</span>'+cb(b+"na","Not age-appropriate")+cb(b+"ci","Contraindication")+cb(b+"ii","Insufficient interval")+(v.see?cb(b+"see","* Not available locally"):"")+'</div></div>';
+      h+='<div class="opts vwaive"><span class="wl">Waiver</span>'+cb(b+"na","Not age-appropriate")+cb(b+"ci","Contraindication")+cb(b+"ii","Insufficient interval")+(v.see?cb(b+"see","See below table"):"")+'</div></div>';
       list.insertAdjacentHTML("beforeend",h); });
     w.appendChild(list); return w;
   }
@@ -648,6 +692,7 @@ if(typeof module!=="undefined") module.exports=I693;
     var clinicPatientWrap=null;
     S.forEach(function(sec){
       if(mode==="patient" && sec.who!=="patient") return;
+      if(mode==="edit" && !srcBytes) return;
       var s=el("section",{class:"part",id:sec.id});
       s.appendChild(el("header",null,'<span class="eyebrow">'+esc(sec.part)+'</span><h2>'+esc(sec.title)+'</h2>'+(sec.note?'<span class="who">'+esc(sec.note)+'</span>':"")));
       var body=s;
@@ -689,6 +734,15 @@ if(typeof module!=="undefined") module.exports=I693;
     if(/^v\d+na$/.test(k)){ st.__manual=st.__manual||{}; st.__manual[k]=true; if(st.__auto) delete st.__auto[k]; }
     if(TEST_KEYS[k]) markManual(k);
     if(k==="dob"||k==="exam1"){ applyAgeRules(); applyTestRules(); sync(); }
+    var vd=/^v(\d+)(d\d|g)$/.exec(k);
+    if(vd && mode!=="patient"){ var b="v"+vd[1], ck=b+"c"; st.__auto=st.__auto||{}; st.__manual=st.__manual||{};
+      var any=["d0","d1","d2","d3","g"].some(function(x){ return !!st[b+x]; });
+      if(!st.__manual[ck]){
+        if(any && (!st[ck] || (st.__auto[ck] && st[ck]!=="X"))){ st[ck]="X"; st.__auto[ck]=true; }
+        else if(!any && st.__auto[ck]){ if(C_DEFAULT[ck]) st[ck]=C_DEFAULT[ck]; else { st[ck]=""; delete st.__auto[ck]; } }
+        var ci=document.getElementById("f_"+ck); if(ci) ci.value=st[ck]||"";
+      } }
+    if(/^v\d+c$/.test(k)) markManual(k);
     if(k.slice(-2)==="On"||/^(intOn|prepOn|refOn)$/.test(k)) document.querySelectorAll('[data-show="'+k+'"]').forEach(function(d){ d.hidden=!st[k]; });
   }
 
@@ -708,25 +762,29 @@ if(typeof module!=="undefined") module.exports=I693;
   $("#lock").addEventListener("submit",async function(e){ e.preventDefault();
     var h=await sha($("#pw").value);
     $("#pw").value="";
-    if(h===PW_HASH){ isUnlocked=true; $("#pw-err").hidden=true; bumpIdle(); setMode("clinic"); }
+    if(h===PW_HASH){ isUnlocked=true; $("#pw-err").hidden=true; bumpIdle(); setMode(pendingMode||"clinic"); }
     else { var e=$("#pw-err"); e.textContent="That password isn't right. Check capitalization and try again."; e.style.color="var(--bad)"; e.hidden=false; $("#pw").focus(); } });
+  $("#lockbtn-e").onclick=function(){ relock("Locked. Patient data was cleared from this screen."); };
   $("#lockbtn").onclick=function(){ relock("Locked. Patient data was cleared from this screen."); };
   $("#pw-back").onclick=function(){ if(location.hash) history.replaceState(null,"",location.pathname+location.search); setMode("patient"); };
-  function showLock(){ mode="locked"; $("#m-patient").setAttribute("aria-pressed","false"); $("#m-clinic").setAttribute("aria-pressed","true");
-    $("#intro-patient").hidden=true; $("#intro-clinic").hidden=true; $("#parts").innerHTML=""; $("#parts").hidden=true; $("#lock").hidden=false;
+  var pendingMode="clinic";
+  function showLock(want){ if(want) pendingMode=want; mode="locked"; $("#m-patient").setAttribute("aria-pressed","false"); $("#m-clinic").setAttribute("aria-pressed",pendingMode==="clinic"); $("#m-edit").setAttribute("aria-pressed",pendingMode==="edit");
+    $("#intro-patient").hidden=true; $("#intro-clinic").hidden=true; $("#intro-edit").hidden=true; $("#parts").innerHTML=""; $("#parts").hidden=true; $("#lock").hidden=false;
     document.querySelector(".bar").hidden=true; st={}; setTimeout(function(){ $("#pw").focus(); },50); }
 
   /* ---------- modes ---------- */
   function setMode(m){
-    if(m==="clinic" && !unlocked()) return showLock();
-    $("#lock").hidden=true; $("#parts").hidden=false; document.querySelector(".bar").hidden=false; mode=m; $("#m-patient").setAttribute("aria-pressed",m==="patient"); $("#m-clinic").setAttribute("aria-pressed",m==="clinic");
-    $("#intro-patient").hidden=m!=="patient"; $("#intro-clinic").hidden=m!=="clinic";
+    if((m==="clinic"||m==="edit") && !unlocked()) return showLock(m);
+    $("#lock").hidden=true; $("#parts").hidden=false; document.querySelector(".bar").hidden=false; mode=m;
+    $("#m-patient").setAttribute("aria-pressed",m==="patient"); $("#m-clinic").setAttribute("aria-pressed",m==="clinic"); $("#m-edit").setAttribute("aria-pressed",m==="edit");
+    $("#intro-patient").hidden=m!=="patient"; $("#intro-clinic").hidden=m!=="clinic"; $("#intro-edit").hidden=m!=="edit";
     setButtons(m);
     if(m==="patient"){ isUnlocked=false; clearTimeout(idleT); wipe(); }
+    else if(m==="edit"){ srcBytes=null; srcName=""; st={}; origSnap=null; $("#loaded-e").hidden=true; $("#drop-e").hidden=false; }
     else { srcBytes=null; srcName=""; st={}; I693.load(tplBytes()).then(function(s){ st=defaults(s); render(); }); $("#loaded").hidden=true; $("#drop").hidden=false; }
-    status(m==="patient"?"Required fields are marked *":"Open the applicant's PDF, or start blank");
+    status(m==="patient"?"Required fields are marked *": m==="edit"? "Open the I-693 PDF you want to edit" : "Open the applicant's PDF, or start blank");
     render(); }
-  $("#m-patient").onclick=function(){ setMode("patient"); }; $("#m-clinic").onclick=function(){ setMode("clinic"); };
+  $("#m-patient").onclick=function(){ setMode("patient"); }; $("#m-clinic").onclick=function(){ setMode("clinic"); }; $("#m-edit").onclick=function(){ setMode("edit"); };
 
   /* ---------- clinic: open PDF ---------- */
   var drop=$("#drop");
@@ -744,11 +802,55 @@ if(typeof module!=="undefined") module.exports=I693;
       render(); status("Loaded "+f.name+". Complete the medical sections, then save.","ok");
     }catch(e){ status("That file couldn't be read as an I-693. Ask the applicant to send the PDF downloaded from this page.","err"); }
   }
+  var origSnap=null;
+  function snap(o){ var c={}; Object.keys(o).forEach(function(k){ if(k.indexOf("__")<0) c[k]=o[k]; }); return JSON.parse(JSON.stringify(c)); }
+  var de=$("#drop-e");
+  ["dragover","dragenter"].forEach(function(t){ de.addEventListener(t,function(e){ e.preventDefault(); de.classList.add("over"); }); });
+  ["dragleave","drop"].forEach(function(t){ de.addEventListener(t,function(){ de.classList.remove("over"); }); });
+  de.addEventListener("drop",function(e){ e.preventDefault(); var f=e.dataTransfer.files[0]; if(f) openEdit(f); });
+  $("#file-e").onchange=function(){ if(this.files[0]) openEdit(this.files[0]); this.value=""; };
+  $("#lde-change").onclick=function(){ $("#file-e").click(); };
+  async function openEdit(f){
+    status("Reading "+f.name+"…");
+    try{ var buf=new Uint8Array(await f.arrayBuffer()); var s=await I693.load(buf);
+      srcBytes=buf; srcName=f.name; st=s; origSnap=snap(s);
+      $("#lde-name").textContent=((s.giv||"")+" "+(s.fam||"")).trim()||"Name not filled in";
+      $("#lde-meta").textContent=[s.dob?"DOB "+I693.iso2us(s.dob):null, s.anum?"A-"+s.anum:null, f.name].filter(Boolean).join("  ·  ");
+      $("#loaded-e").hidden=false; $("#drop-e").hidden=true;
+      render(); status("Loaded "+f.name+". Make your changes, then save or email it.","ok");
+    }catch(e){ status("That file couldn't be read as an I-693. Open a PDF made with this page.","err"); }
+  }
+  var VSUF={c:"complete series",g:"given by civil surgeon",na:"not age-appropriate",ci:"contraindication",ii:"insufficient interval",see:"see below table"};
+  function fieldLabel(sp,key){
+    var part=sp.sec.part, m=/^v(\d+)(.*)$/.exec(sp.k);
+    if(m && I693.VAX[+m[1]]){ var v=I693.VAX[+m[1]].n, x=m[2], d=/^d(\d)$/.exec(x), t=/^s(.+)$/.exec(x);
+      return "Part 10, "+v+": "+(d? "date received "+(+d[1]+1) : t? t[1]+" box" : (VSUF[x]||x)); }
+    var sm=/^(sm|cu)(\d)(o|r|x)$/.exec(sp.k);
+    if(sm) return part+", sputum "+(sm[1]==="sm"?"smear":"culture")+" "+(+sm[2]+1)+" "+({o:"date obtained",r:"date reported",x:"result"})[sm[3]];
+    return part+", "+(sp.l||sp.k).replace(/^\(\w+\)\s*/,"")+(key? " ("+key+")":"");
+  }
+  function show(v){ if(v===true) return "checked"; if(v===false||v==null||v==="") return "blank"; return /^\d{4}-\d{2}-\d{2}$/.test(v)? I693.iso2us(v) : String(v); }
+  function changes(){
+    if(!origSnap) return [];
+    var out=[], seen={};
+    I693.specs().forEach(function(sp){
+      if(sp.t==="checks"){ sp.o.forEach(function(o){ var k=sp.k+"|"+o[0]; var a=!!origSnap[k], b=!!st[k]; if(a!==b) out.push(fieldLabel(sp,o[0])+": "+(b?"checked":"unchecked")); }); return; }
+      if(seen[sp.k]) return; seen[sp.k]=1;
+      var a=origSnap[sp.k], b=st[sp.k];
+      if(sp.sec.toggle && !st[sp.sec.toggle]) b = sp.t==="check"? false : "";
+      var na=(a===true||a===false)? !!a : (a||""), nb=(b===true||b===false)? !!b : (b||"");
+      if(sp.t==="check"){ na=!!a; nb=!!b; }
+      if(String(na)!==String(nb)) out.push(fieldLabel(sp)+": "+(sp.t==="check"? (nb?"checked":"unchecked") : show(a)+" \u2192 "+show(b)));
+    });
+    return out;
+  }
   function showLoaded(n,m){ $("#ld-name").textContent=n; $("#ld-meta").textContent=m; $("#loaded").hidden=false; $("#drop").hidden=true; }
 
   /* ---------- save ---------- */
   function defaults(s){
     /* Part 7: clinic suite, also fills PDFs made before the suite was added */
+    if(!s.exam1) s.exam1=isoDay(0);
+    Object.keys(C_DEFAULT).forEach(function(k){ if(!s[k]){ s[k]=C_DEFAULT[k]; s.__auto=s.__auto||{}; s.__auto[k]=true; } });
     ["cp","cm"].forEach(function(x){ if(!s[x+"Un"]){ s[x+"Un"]="694"; if(!s[x+"Ut"]) s[x+"Ut"]="Ste"; } });
     /* Usual findings, preselected. Only fills answers that are still blank, so a reopened PDF keeps what was chosen. */
     Object.keys(CLINIC_DEFAULTS).forEach(function(k){ if(!s[k]) s[k]=CLINIC_DEFAULTS[k]; });
@@ -762,16 +864,21 @@ if(typeof module!=="undefined") module.exports=I693;
   };
   /* Lab tests by age (clinic protocol). Filled when the age calls for the test, cleared again
      if a corrected DOB means it no longer applies. Anything the provider changes is left alone. */
+  var C_DEFAULT={ v12c:"NA" };   /* COVID-19 complete series */
+  function isoDay(add,from){ var m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(from||""); var d=m? new Date(+m[1],+m[2]-1,+m[3]) : new Date(); d.setHours(12,0,0,0); d.setDate(d.getDate()+(add||0));
+    return d.getFullYear()+"-"+("0"+(d.getMonth()+1)).slice(-2)+"-"+("0"+d.getDate()).slice(-2); }
+  /* "@exam" = exam date (today by default), "@next" = the day after */
+  function testVal(v){ return v==="@exam"? isoDay(0,st.exam1) : v==="@next"? isoDay(1,st.exam1) : v; }
   var TEST_GROUPS=[
     { id:"tb", name:"QuantiFERON TB test", rule:"age 2 and older",
       needed:function(a){ return a? a.years>=2 : true; },
-      set:{ igra:"QuantiFERON", igraRes:"Negative", cxrNeed:"Chest X-ray not required (medically cleared for TB)", spDec:"No, not indicated", tbClass:"No Class A or Class B TB" } },
+      set:{ igra:"QuantiFERON", igraDate:"@exam", igraRes:"Negative", cxrNeed:"Chest X-ray not required (medically cleared for TB)", spDec:"No, not indicated", tbClass:"No Class A or Class B TB" } },
     { id:"sy", name:"RPR Screen (syphilis)", rule:"ages 18\u201344",
       needed:function(a){ return a? (a.years>=18 && a.years<=44) : true; },
-      set:{ ntN:"RPR Screen", ntRes:"Nonreactive", syF:"No Class A or Class B syphilis" } },
+      set:{ ntN:"RPR Screen", ntC:"@exam", ntD:"@next", ntRes:"Nonreactive", syF:"No Class A or Class B syphilis" } },
     { id:"gc", name:"GC NAAT Urine (gonorrhea)", rule:"ages 18\u201324",
       needed:function(a){ return a? (a.years>=18 && a.years<=24) : false; },
-      set:{ gN:"GC NAAT Urine", gRes:"Negative", gF:"No Class A or Class B gonorrhea" } }
+      set:{ gN:"GC NAAT Urine", gD:"@next", gRes:"Negative", gF:"No Class A or Class B gonorrhea" } }
   ];
   var TEST_KEYS={}; TEST_GROUPS.forEach(function(g){ Object.keys(g.set).forEach(function(k){ TEST_KEYS[k]=1; }); });
   function markManual(k){ st.__manual=st.__manual||{}; st.__manual[k]=true; if(st.__auto) delete st.__auto[k]; }
@@ -783,7 +890,8 @@ if(typeof module!=="undefined") module.exports=I693;
       var need=g.needed(a);
       Object.keys(g.set).forEach(function(k){
         if(st.__manual[k]) return;
-        if(need){ if(!st[k]){ st[k]=g.set[k]; st.__auto[k]=true; if(k==="ntN"||k==="gN") st[k+"__other"]=false; } }
+        var val=testVal(g.set[k]);
+        if(need){ if(!st[k] || (st.__auto[k] && st[k]!==val)){ st[k]=val; st.__auto[k]=true; if(k==="ntN"||k==="gN") st[k+"__other"]=false; } }
         else if(st.__auto[k]){ st[k]=""; delete st.__auto[k]; }
       });
       lines.push((need?"<b>Required:</b> ":"<span style=\"color:var(--muted)\">Not required:</span> ")+g.name+" <span style=\"color:var(--muted)\">("+g.rule+")</span>");
@@ -793,7 +901,7 @@ if(typeof module!=="undefined") module.exports=I693;
     if(!box){ box=el("div",{class:"note",id:"test-age",style:"font-size:13.5px;margin-bottom:14px"}); host.insertBefore(box, host.children[1]||null); }
     box.className = a? "note" : "note warn";
     box.innerHTML="<div>"+(a? "<b>Tests for age "+ageText(a)+"</b>" : "<b>No date of birth yet.</b> TB and syphilis are filled for now; add the DOB in Part 1 to apply the age rules.")+
-      "<br>"+lines.join("<br>")+"<br><span style=\"color:var(--muted)\">Results are preset to negative or nonreactive. Change them if the lab says otherwise.</span></div>";
+      "<br>"+lines.join("<br>")+"<br><span style=\"color:var(--muted)\">Results are preset to negative or nonreactive. Sample dates use the exam date"+(st.exam1? " ("+I693.iso2us(st.exam1)+")":"")+" and report dates the day after. Change any of them if the lab says otherwise.</span></div>";
   }
   function status(t,c){ var s=$("#status"); s.textContent=t; s.className="status"+(c?" "+c:""); }
   function validate(){ var bad=[];
@@ -813,16 +921,17 @@ if(typeof module!=="undefined") module.exports=I693;
   /* ---------- email to staff ----------
      SEND_URL = the Google Apps Script web app URL (see send-to-staff.gs).
      The recipient is fixed inside that script, so this page can't send anywhere else. */
-  var SEND_URL = "https://script.google.com/macros/s/AKfycbyG5G8SSJeOPJaV4n0Y8n-JhNXZn4JH5p0B9Jf_wMcRTMjy2aG_I90hI7OFt8p0W0An/exec";
+  var SEND_URL = "https://script.google.com/macros/s/AKfycbzNlpyx6fkl41vNhgqnERDs3SIX5skmNE4As1KX8Wv5Bxy6oBNOD_YlciuikrU5WCo5/exec";
   var CLINIC_EMAIL = "incredibleheartit@gmail.com";
   var ICO_DL='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>';
   var ICO_MAIL='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>';
   function setButtons(m){
     function L(lg,sm){ return '<span class="lg">'+lg+'</span><span class="sm">'+sm+'</span>'; }
     if(m==="patient"){ $("#save-ico").innerHTML=ICO_MAIL; $("#save-l").innerHTML=L("Email to clinic","Email clinic"); $("#b2-ico").innerHTML=ICO_DL; $("#b2-l").innerHTML=L("Download","Download"); }
+    else if(m==="edit"){ $("#save-ico").innerHTML=ICO_DL; $("#save-l").innerHTML=L("Save edited I-693","Save edits"); $("#b2-ico").innerHTML=ICO_MAIL; $("#b2-l").innerHTML=L("Email to staff","Email staff"); }
     else { $("#save-ico").innerHTML=ICO_DL; $("#save-l").innerHTML=L("Save completed I-693","Save I-693"); $("#b2-ico").innerHTML=ICO_MAIL; $("#b2-l").innerHTML=L("Email to staff","Email staff"); }
   }
-  function fileName(){ return ("I-693_"+(slug(st.fam)||"Applicant")+"_"+(slug(st.giv)||"")+(mode==="patient"?"_applicant":"_complete")+".pdf").replace("__","_"); }
+  function fileName(){ return ("I-693_"+(slug(st.fam)||"Applicant")+"_"+(slug(st.giv)||"")+(mode==="patient"?"_applicant":mode==="edit"?"_edited":"_complete")+".pdf").replace("__","_"); }
   function checkPatient(){
     if(mode!=="patient") return true;
     var bad=validate(); if(!bad.length) return true;
@@ -830,9 +939,9 @@ if(typeof module!=="undefined") module.exports=I693;
     var first=document.querySelector(".invalid"); if(first) first.focus(); return false;
   }
   async function makePdf(){
-    var base=(mode==="clinic" && srcBytes)? srcBytes : tplBytes();
+    var base=(mode!=="patient" && srcBytes)? srcBytes : tplBytes();
     var out=await I693.build(base, st, mode==="patient"?"patient":null);
-    if(mode==="clinic") srcBytes=out;
+    if(mode!=="patient") srcBytes=out;
     return out;
   }
   function b64(u8){ var s="",CH=0x8000; for(var i=0;i<u8.length;i+=CH) s+=String.fromCharCode.apply(null,u8.subarray(i,i+CH)); return btoa(s); }
@@ -847,6 +956,7 @@ if(typeof module!=="undefined") module.exports=I693;
   }
   async function doEmail(){
     if(busy||!checkPatient()) return;
+    if(mode==="edit" && !srcBytes){ status("Open the I-693 PDF you want to edit first.","err"); return; }
     if(mode==="clinic" && !srcBytes && !st.fam){ status("Open the applicant's PDF first, or start a blank form.","err"); return; }
     if(!/^https:\/\/script\.google\.com\//.test(SEND_URL)){ status("Email isn't set up on this page yet. Download the PDF and email it to "+CLINIC_EMAIL+".","err"); return; }
     busy=true; lock(true); status("Sending to Incredible Heart…");
@@ -855,11 +965,11 @@ if(typeof module!=="undefined") module.exports=I693;
       var who=((st.giv||"")+" "+(st.fam||"")).trim()||"Applicant";
       var dob=st.dob? I693.iso2us(st.dob):"";
       var payload={
-        kind: mode==="patient"?"applicant":"civil_surgeon",
+        kind: mode==="patient"?"applicant": mode==="edit"?"edited":"civil_surgeon",
         filename: nm,
         name: who,
-        subject: "I-693 | "+who+" | Sent by "+(mode==="patient"?"Applicant":"Provider"),
-        body: (mode==="patient"
+        subject: "I-693 | "+who+" | "+(mode==="edit"?"Edited":"Sent by "+(mode==="patient"?"Applicant":"Provider")),
+        body: mode==="edit" ? editBody(who,dob,nm) : (mode==="patient"
           ? "An applicant submitted Parts 1–5 of Form I-693 from the online form.\n\nName: "+who+(dob?"\nDate of birth: "+dob:"")+(st.ph?"\nPhone: "+st.ph:"")+(st.em?"\nEmail: "+st.em:"")+"\n\nThe filled PDF is attached. Open it in the clinic view of the I-693 page to complete the medical sections."
           : "The civil surgeon saved the I-693 for "+who+(dob?" (DOB "+dob+")":"")+".\n\nThe combined PDF is attached."),
         replyTo: (mode==="patient" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(st.em||""))? st.em : "",
@@ -869,21 +979,28 @@ if(typeof module!=="undefined") module.exports=I693;
       var j=null; try{ j=await res.json(); }catch(_){}
       if(j && j.ok){
         var t=new Date().toLocaleTimeString([], {hour:"numeric",minute:"2-digit"});
-        status(mode==="patient"? "Sent to Incredible Heart at "+t+". You can close this page. Bring your ID to the visit." : "Emailed "+nm+" to staff at "+t+".","ok");
+        status(mode==="patient"? "Sent to Incredible Heart at "+t+". You can close this page. Bring your ID to the visit." : mode==="edit"? "Emailed the edited I-693 to staff at "+t+" ("+changes().length+" changes listed)." : "Emailed "+nm+" to staff at "+t+".","ok");
       } else if(j && j.error==="rate_limited"){
         status("Too many forms were sent in the last hour. Please try again later, or download the PDF and email it to "+CLINIC_EMAIL+".","err");
       } else throw new Error(j&&j.error||("HTTP "+res.status));
     }catch(e){ console.error(e); status("Couldn't send the email. Download the PDF and email it to "+CLINIC_EMAIL+" instead.","err"); }
     busy=false; lock(false);
   }
+  function editBody(who,dob,nm){
+    var ch=changes();
+    return "EDITED: the I-693 for "+who+(dob?" (DOB "+dob+")":"")+" was edited on "+new Date().toLocaleString([], {month:"2-digit",day:"2-digit",year:"numeric",hour:"numeric",minute:"2-digit"})+
+      (srcName? "\nOriginal file: "+srcName : "")+"\n\n"+
+      (ch.length? "What changed ("+ch.length+"):\n- "+ch.slice(0,80).join("\n- ")+(ch.length>80? "\n- …and "+(ch.length-80)+" more":"") : "No fields were changed.")+
+      "\n\nThe edited PDF ("+nm+") is attached and replaces the earlier version.";
+  }
   function lock(on){ $("#save").disabled=on; $("#b2").disabled=on; }
   $("#save").onclick=function(){ return mode==="patient"? doEmail() : doDownload(); };
   $("#b2").onclick=function(){ return mode==="patient"? doDownload() : doEmail(); };
 
   /* Coming back with the browser's Back button restores a cached page: lock and clear it */
-  window.addEventListener("pageshow",function(e){ if(e.persisted){ isUnlocked=false; clearTimeout(idleT); wipe(); setMode(location.hash==="#clinic"?"clinic":"patient"); } });
-  setMode(location.hash==="#clinic"?"clinic":"patient");
-  window.addEventListener("hashchange",function(){ setMode(location.hash==="#clinic"?"clinic":"patient"); });
+  window.addEventListener("pageshow",function(e){ if(e.persisted){ isUnlocked=false; clearTimeout(idleT); wipe(); setMode(location.hash==="#clinic"?"clinic":location.hash==="#edit"?"edit":"patient"); } });
+  setMode(location.hash==="#clinic"?"clinic":location.hash==="#edit"?"edit":"patient");
+  window.addEventListener("hashchange",function(){ setMode(location.hash==="#clinic"?"clinic":location.hash==="#edit"?"edit":"patient"); });
 })();
 </script>
 </body>
